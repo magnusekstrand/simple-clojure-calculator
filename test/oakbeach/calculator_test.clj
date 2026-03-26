@@ -5,6 +5,7 @@
 (deftest calculator-basics
   (testing "Basic arithmetic"
     (is (= "5.0" (handle-input "2 + 3")))
+    (is (= "4.0" (handle-input "58 - 54")))    
     (is (= "10.0" (handle-input "20 / 2")))
     (is (= "6.0" (handle-input "2 * 3"))))
 

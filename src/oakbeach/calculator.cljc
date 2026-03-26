@@ -20,13 +20,27 @@
    "^" 3})
 
 (defn tokenize [input]
-  (->> (re-seq #"\d+\.?\d*|[+\-*\^/()]" input)
-       (map (fn [token]
-              (if (re-matches #"\d+\.?\d*" token)
-                ;; Här väljer vi rätt parser beroende på plattform
-                #?(:cljs (js/parseFloat token)
-                   :clj  (Double/parseDouble token))
-                token)))))
+  (let [;; 1. Validera otillåtna tecken direkt (bokstäver etc)
+        _ (when (re-find #"[a-zA-Z]" input)
+            (throw #?(:clj (Exception. "Invalid character in expression")
+                      :cljs (js/Error. "Invalid character in expression"))))
+
+        ;; 2. Förbered strängen: sätt mellanslag runt operatorer, 
+        ;; men INTE om minuset sitter ihop med en siffra i början.
+        prepared (-> input
+                     (clojure.string/replace #"([+*/()^])" " $1 ")
+                     ;; Sätt mellanslag runt minus ENDAST om det föregås av en siffra eller parentes
+                     (clojure.string/replace #"(\d|\))-" "$1 - ")
+                     (clojure.string/trim))
+
+        raw-tokens (clojure.string/split prepared #"\s+")
+        clean-tokens (remove clojure.string/blank? raw-tokens)]
+
+    (map (fn [t]
+           (if (re-matches #"-?\d+\.?\d*" t)
+             #?(:clj (Double/parseDouble t) :cljs (js/parseFloat t))
+             t))
+         clean-tokens)))
 
 ;; 3. The Nesting Logic: Turns flat tokens into nested vectors
 (defn nest-tokens [tokens]
@@ -93,11 +107,12 @@
 (defn handle-input [input]
   (try
     (let [tokens (tokenize input)
-          tree   (nest-tokens tokens)]
-      (str (solve tree)))
-    ;; Här väljer vi Exception för Java och Error för JavaScript
+          ;; Här antar vi att din solve kan hantera [(-5.0) "+" (2.0)]
+          result (solve (nest-tokens tokens))]
+      (str result))
     (catch #?(:clj Exception :cljs js/Error) e
-      (str "Error: " #?(:clj (.getMessage e) :cljs (.-message e))))))
+      ;; Returnera bara meddelandet så att (re-find #"Invalid character" ...) matchar
+      #?(:clj (.getMessage e) :cljs (.-message e)))))
 
 #?(:clj
   (defn -main [& args]
