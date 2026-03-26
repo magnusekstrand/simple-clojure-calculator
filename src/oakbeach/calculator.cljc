@@ -8,19 +8,25 @@
    "*" *
    "/" (fn [a b]
          (if (zero? b)
-           (throw (ArithmeticException. "Divide by zero"))
+           (throw #?(:clj (ArithmeticException. "Divide by zero")
+                     :cljs (js/Error. "Divide by zero")))
            (/ a b)))
-   "^" #(Math/pow %1 %2)})
+   "^" #?(:clj  #(Math/pow %1 %2)
+          :cljs #(js/Math.pow %1 %2))})
 
 (def precedence
   {"+" 1 "-" 1
    "*" 2 "/" 2
    "^" 3})
 
-(defn tokenize [s]
-  ;; This regex now says: "Optional minus sign, followed by digits and optional decimal"
-  ;; OR "Any of these single character operators/parens"
-  (re-seq #"-?\d+\.?\d*|[\+\-\*\/\^]|\(|\)" s))
+(defn tokenize [input]
+  (->> (re-seq #"\d+\.?\d*|[+\-*\^/()]" input)
+       (map (fn [token]
+              (if (re-matches #"\d+\.?\d*" token)
+                ;; Här väljer vi rätt parser beroende på plattform
+                #?(:cljs (js/parseFloat token)
+                   :clj  (Double/parseDouble token))
+                token)))))
 
 ;; 3. The Nesting Logic: Turns flat tokens into nested vectors
 (defn nest-tokens [tokens]
@@ -62,9 +68,18 @@
 (defn solve [expr]
   (cond
     (vector? expr) (solve-flat-list expr)
-    (string? expr) (Double/parseDouble expr)
+
+    ;; Handle the string-to-number conversion for both platforms
+    (string? expr)
+    #?(:cljs (js/parseFloat expr)    ;; Only seen by ClojureScript
+       :clj  (Double/parseDouble expr)) ;; Only seen by Java/Leiningen
+
     (number? expr) (double expr)
-    :else (throw (Exception. (str "Cannot solve: " expr)))))
+
+    :else
+    (throw
+      #?(:cljs (js/Error. (str "Cannot solve: " expr)) ;; JavaScript Error
+         :clj  (Exception. (str "Cannot solve: " expr)))))) ;; Java Exception
 
 (defn- show-help []
   (let [op-list (str/join ", " (sort (keys operations)))]
@@ -76,34 +91,25 @@
 
 ;; 5. Entry point
 (defn handle-input [input]
-  (let [clean-input (str/lower-case (str/trim input))]
-    (cond
-      (= clean-input "help") (show-help)
+  (try
+    (let [tokens (tokenize input)
+          tree   (nest-tokens tokens)]
+      (str (solve tree)))
+    ;; Här väljer vi Exception för Java och Error för JavaScript
+    (catch #?(:clj Exception :cljs js/Error) e
+      (str "Error: " #?(:clj (.getMessage e) :cljs (.-message e))))))
 
-      ;; NEW: Check if there are any characters NOT in our allowed set
-      ;; This looks for anything that isn't a digit, dot, space, parens, or operator
-      (re-find #"[^\d\s\.\+\-\*\/\^\(\)]" input)
-      (str "Error: Invalid character or number: " input)
-
-      :else (try
-              (let [tokens (tokenize input)
-                    tree   (nest-tokens tokens)]
-                (if (empty? tokens)
-                  "0.0"
-                  (str (solve tree))))
-              (catch Exception e
-                (str "Error: " (.getMessage e)))))))
-
-(defn -main [& args]
-  (println "--- Functional Clojure Calculator ---")
-  (println "Enter expressions like: 1 + (2 * 3)")
-  (println "Type 'exit' to quit.")
-  (loop []
-    (print "> ")
-    (flush) ;; Ensures the prompt appears before input
-    (let [input (read-line)]
-      (if (or (nil? input) (= (str/lower-case input) "exit"))
-        (println "Goodbye!")
-        (do
-          (println (handle-input input))
-          (recur))))))
+#?(:clj
+  (defn -main [& args]
+    (println "--- CLI Calculator ---")
+    (println "Enter expressions like: 1 + (2 * 3)")
+    (println "Type 'exit' to quit.")
+    (loop []
+      (print "> ")
+      (flush) ;; Ensures the prompt appears before input
+      (let [input (read-line)]
+        (if (or (nil? input) (= (str/lower-case input) "exit"))
+          (println "Goodbye!")
+          (do
+            (println (handle-input input))
+            (recur)))))))
